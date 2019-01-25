@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,17 @@ func getenv(key, deft string) string {
 }
 
 func daemon() {
+	f, err := os.Create("cpu.prof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
+	go func() {
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+		time.Sleep(time.Second * 10)
+	}()
+
 	s := wsync.NewServer()
 	s.Auth = func(token string, m wsync.AuthMethod, topic string) bool {
 		// fmt.Println("auth:", token, m, topic)
@@ -35,10 +48,17 @@ func daemon() {
 	go s.Serve()
 
 	go func() {
+		lastSent := 0
 		for range time.Tick(time.Second) {
 			s.C <- func(s *wsync.Server) {
+				if lastSent == 0 {
+					lastSent = s.MessageSent
+				}
+
 				fmt.Println("message_sent:", s.MessageSent)
 				fmt.Println("connected_count:", len(s.Agents))
+				fmt.Println("message_sent_per_second:", s.MessageSent-lastSent)
+				lastSent = s.MessageSent
 			}
 		}
 	}()
@@ -68,12 +88,12 @@ func tclient() {
 		//fmt.Println("error:", err)
 	}
 	c.AfterOpen = func(conn *websocket.Conn) {
-		conn.WriteMessage(websocket.TextMessage, []byte("A:mofon"))
 		go func() {
 			c.Sub("test", "testclient")
 
-			time.Sleep(time.Second)
-			c.Boardcast("testclient")
+			for {
+				c.Boardcast("testclient")
+			}
 		}()
 	}
 
