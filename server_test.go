@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestServer(t *testing.T) {
@@ -41,8 +43,8 @@ func tclient() {
 	c.OnError = func(err error) {
 		fmt.Println("error:", err)
 	}
-	c.AfterOpen = func() {
-		c.Sub <- "test"
+	c.AfterOpen = func(_ *websocket.Conn) {
+		go func() { c.Sub <- "test" }()
 	}
 
 	c.Serve()

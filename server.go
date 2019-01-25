@@ -18,6 +18,14 @@ var DefaultUpgrader = websocket.Upgrader{
 
 const DefaultMessageCache = 1
 
+type AuthMethod int
+
+const (
+	AuthMethod_Auth AuthMethod = iota
+	AuthMethod_Sub
+	AuthMethod_Boardcast
+)
+
 type Agent struct {
 	Sub map[string]bool
 }
@@ -41,6 +49,7 @@ type Server struct {
 	// readonly
 	Upgrader     websocket.Upgrader
 	MessageCache int
+	Auth         func(token string, m AuthMethod, topic string) bool
 }
 
 func NewServer() *Server {
@@ -52,6 +61,7 @@ func NewServer() *Server {
 
 		Upgrader:     DefaultUpgrader,
 		MessageCache: DefaultMessageCache,
+		Auth:         func(_ string, _ AuthMethod, _ string) bool { return true },
 	}
 }
 
@@ -107,26 +117,47 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// read loop
+	var token string
 	for {
 		_, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Println(err)
 			return
 		}
 		if p[1] != ':' || len(p) < 2 {
-			log.Println("error format")
 			return
 		}
 
-		text := string(p[2:])
+		topic := string(p[2:])
 
 		switch p[0] {
 		case 'S': // subscibe
-			s.C <- func(s *Server) { s.Sub(conn, text) }
+			s.C <- func(s *Server) {
+				if !s.Auth(token, AuthMethod_Sub, topic) {
+					conn.Close()
+				}
+				s.Sub(conn, topic)
+			}
 		case 'A': // auth
-		// TODO
+			s.C <- func(s *Server) {
+				token = topic
+				if !s.Auth(token, AuthMethod_Auth, "") {
+					conn.Close()
+				}
+			}
 		case 'U': // unsubscibe
-			s.C <- func(s *Server) { s.Unsub(conn, text) }
+			s.C <- func(s *Server) {
+				if !s.Auth(token, AuthMethod_Sub, topic) {
+					conn.Close()
+				}
+				s.Unsub(conn, topic)
+			}
+		case 'B': //boardcast
+			s.C <- func(s *Server) {
+				if !s.Auth(token, AuthMethod_Boardcast, topic) {
+					conn.Close()
+				}
+				s.Boardcast(topic)
+			}
 		case 'P': // ping
 			// TODO
 		}

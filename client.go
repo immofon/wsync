@@ -12,11 +12,12 @@ type Client struct {
 	URL       string
 	Dialer    *websocket.Dialer
 	OnTopic   func(string)
-	AfterOpen func()
+	AfterOpen func(conn *websocket.Conn)
 	OnError   func(error)
 
-	Unsub chan string
-	Sub   chan string
+	Unsub     chan string
+	Sub       chan string
+	Boardcast chan string
 }
 
 func NewClient(url string) *Client {
@@ -24,11 +25,12 @@ func NewClient(url string) *Client {
 		URL:       url,
 		Dialer:    DefaultDialer,
 		OnTopic:   func(_ string) {},
-		AfterOpen: func() {},
+		AfterOpen: func(_ *websocket.Conn) {},
 		OnError:   func(_ error) {},
 
-		Unsub: make(chan string),
-		Sub:   make(chan string),
+		Unsub:     make(chan string),
+		Sub:       make(chan string),
+		Boardcast: make(chan string),
 	}
 
 	return c
@@ -42,7 +44,7 @@ func (c *Client) Serve() {
 	}
 	defer conn.Close()
 
-	go c.AfterOpen()
+	c.AfterOpen(conn)
 
 	// read loop
 	go func(conn *websocket.Conn) {
@@ -78,6 +80,12 @@ func (c *Client) Serve() {
 			}
 		case topic := <-c.Unsub:
 			err := conn.WriteMessage(websocket.TextMessage, []byte("U:"+topic))
+			if err != nil {
+				c.OnError(err)
+				return
+			}
+		case topic := <-c.Boardcast:
+			err := conn.WriteMessage(websocket.TextMessage, []byte("B:"+topic))
 			if err != nil {
 				c.OnError(err)
 				return
