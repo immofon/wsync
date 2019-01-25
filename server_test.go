@@ -3,6 +3,7 @@ package wsync
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,10 +31,15 @@ func TestServer(t *testing.T) {
 
 	go http.ListenAndServe(":8111", s)
 
+	wg := &sync.WaitGroup{}
 	for i := 0; i < 300; i++ {
-		go tclient()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tclient()
+		}()
 	}
-	tclient()
+	wg.Wait()
 }
 
 func tclient() {

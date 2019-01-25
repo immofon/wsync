@@ -114,7 +114,9 @@ func client() {
 		}()
 	}
 
-	c.Serve()
+	for {
+		c.Serve()
+	}
 
 }
 

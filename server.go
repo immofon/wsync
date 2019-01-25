@@ -26,6 +26,19 @@ const (
 	AuthMethod_Boardcast
 )
 
+func (am AuthMethod) String() string {
+	switch am {
+	case AuthMethod_Auth:
+		return "[auth:auth]"
+	case AuthMethod_Sub:
+		return "[auth:sub]"
+	case AuthMethod_Boardcast:
+		return "[auth:boardcast]"
+	default:
+		return "[auth:unknown]"
+	}
+}
+
 type Agent struct {
 	Sub map[string]bool
 }
@@ -98,6 +111,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ticker := time.NewTicker(time.Millisecond * 10)
 		defer ticker.Stop()
+		pingTicker := time.NewTicker(PingPeriod)
+		defer pingTicker.Stop()
 
 		for {
 			select {
@@ -106,17 +121,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
+				conn.SetWriteDeadline(time.Now().Add(WriteWait))
 				err := conn.WriteMessage(websocket.TextMessage, []byte("T:"+topic))
 				if err != nil {
 					conn.Close()
 				}
 			case <-ticker.C:
 				s.C <- func(s *Server) { s.GetUpdated(conn, updatedCh) }
+			case <-pingTicker.C:
+				conn.SetWriteDeadline(time.Now().Add(WriteWait))
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				if err != nil {
+					conn.Close()
+				}
 			}
 		}
 	}()
 
 	// read loop
+	conn.SetReadDeadline(time.Now().Add(PongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(PongWait))
+		return nil
+	})
+
 	var token string
 	for {
 		_, p, err := conn.ReadMessage()

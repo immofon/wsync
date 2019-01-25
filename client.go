@@ -1,8 +1,6 @@
 package wsync
 
 import (
-	"log"
-
 	"github.com/gorilla/websocket"
 )
 
@@ -50,13 +48,22 @@ func (c *Client) Serve() {
 	go func(conn *websocket.Conn) {
 		defer conn.Close()
 		for {
-			_, p, err := conn.ReadMessage()
+			messageType, p, err := conn.ReadMessage()
 			if err != nil {
 				c.OnError(err)
 				return
 			}
+
+			if messageType == websocket.PingMessage {
+				err := conn.WriteMessage(websocket.PongMessage, nil)
+				if err != nil {
+					c.OnError(err)
+					return
+				}
+				continue
+			}
+
 			if p[1] != ':' || len(p) < 2 {
-				log.Println("error format")
 				return
 			}
 
