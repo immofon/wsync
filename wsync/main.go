@@ -13,10 +13,22 @@ import (
 	"github.com/immofon/wsync"
 )
 
+var ServerURL = getenv("WSYNC_SERVER_URL", "ws://localhost:8111/")
+var ServeAddr = getenv("WSYNC_SERVE_ADDR", "localhost:8111")
+
+func getenv(key, deft string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return deft
+	}
+	return v
+
+}
+
 func daemon() {
 	s := wsync.NewServer()
 	s.Auth = func(token string, m wsync.AuthMethod, topic string) bool {
-		fmt.Println("auth:", token, m, topic)
+		// fmt.Println("auth:", token, m, topic)
 		return true
 	}
 
@@ -31,7 +43,7 @@ func daemon() {
 		}
 	}()
 
-	http.ListenAndServe(":8111", s)
+	http.ListenAndServe(ServeAddr, s)
 }
 
 func test() {
@@ -49,11 +61,11 @@ func test() {
 }
 
 func tclient() {
-	c := wsync.NewClient("ws://localhost:8111", "mofon")
+	c := wsync.NewClient(ServerURL, "mofon")
 	c.OnTopic = func(topic string, metas ...string) {
 	}
 	c.OnError = func(err error) {
-		fmt.Println("error:", err)
+		//fmt.Println("error:", err)
 	}
 	c.AfterOpen = func(conn *websocket.Conn) {
 		conn.WriteMessage(websocket.TextMessage, []byte("A:mofon"))
@@ -65,11 +77,13 @@ func tclient() {
 		}()
 	}
 
-	c.Serve()
+	for {
+		c.Serve()
+	}
 }
 
 func client() {
-	c := wsync.NewClient("ws://localhost:8111", "mofon")
+	c := wsync.NewClient(ServerURL, "mofon")
 	c.OnTopic = func(topic string, metas ...string) {
 		fmt.Println("t:", topic, metas)
 	}
@@ -89,8 +103,6 @@ func client() {
 				raw := scanner.Text()
 				data := strings.Split(raw, " ")
 				method, topic, metas := wsync.DecodeData(data...)
-				fmt.Println(method, topic, metas)
-				fmt.Println(method)
 				switch method {
 				case "S":
 					c.Sub(topic)

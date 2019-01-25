@@ -1,8 +1,6 @@
 package wsync
 
 import (
-	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -100,6 +98,8 @@ type Server struct {
 
 	Agents map[*websocket.Conn]*Agent
 
+	InitMetas map[string][]string // map[topic]metas
+
 	// status
 	MessageSent int
 
@@ -111,8 +111,9 @@ type Server struct {
 
 func NewServer() *Server {
 	return &Server{
-		C:      make(chan ServerFunc, 100),
-		Agents: make(map[*websocket.Conn]*Agent),
+		C:         make(chan ServerFunc, 100),
+		Agents:    make(map[*websocket.Conn]*Agent),
+		InitMetas: make(map[string][]string),
 
 		MessageSent: 0,
 
@@ -197,7 +198,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		method, topic, metas := Decode(string(p))
-		fmt.Println(method, topic, metas)
 
 		switch method {
 		case "S": // subscibe
@@ -234,12 +234,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) Join(conn *websocket.Conn) {
 	s.Agents[conn] = NewAgent()
-	log.Println("join", conn.RemoteAddr())
+	// log.Println("join", conn.RemoteAddr())
 }
 
 func (s *Server) Leave(conn *websocket.Conn) {
 	delete(s.Agents, conn)
-	log.Println("leave", conn.RemoteAddr())
+	// log.Println("leave", conn.RemoteAddr())
 }
 
 func (s *Server) Sub(conn *websocket.Conn, topic string) {
@@ -249,8 +249,8 @@ func (s *Server) Sub(conn *websocket.Conn, topic string) {
 	}
 
 	if _, ok := a.Sub[topic]; !ok {
-		a.Sub[topic] = Topic{false, nil}
-		log.Println("sub", conn.RemoteAddr(), topic)
+		a.Sub[topic] = Topic{true, s.InitMetas[topic]}
+		// log.Println("sub", conn.RemoteAddr(), topic)
 	}
 }
 
@@ -261,16 +261,29 @@ func (s *Server) Unsub(conn *websocket.Conn, topic string) {
 	}
 
 	delete(a.Sub, topic)
-	log.Println("unsub", conn.RemoteAddr(), topic)
+	// log.Println("unsub", conn.RemoteAddr(), topic)
+}
+
+func (s *Server) GC() {
+NextTopic:
+	for topic := range s.InitMetas {
+		for _, a := range s.Agents {
+			if _, ok := a.Sub[topic]; ok {
+				continue NextTopic
+			}
+		}
+		delete(s.InitMetas, topic)
+	}
 }
 
 func (s *Server) Boardcast(topic string, metas ...string) {
+	s.InitMetas[topic] = metas
 	for _, a := range s.Agents {
 		if _, ok := a.Sub[topic]; ok {
 			a.Sub[topic] = Topic{true, metas}
 		}
 	}
-	log.Println("boardcast", topic)
+	// log.Println("boardcast", topic)
 }
 
 func (s *Server) GetUpdated(conn *websocket.Conn, ch chan<- TopicEvent) {
