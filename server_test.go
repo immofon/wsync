@@ -17,7 +17,7 @@ func TestServer(t *testing.T) {
 	go func() {
 		for range time.Tick(time.Second) {
 			s.C <- func(s *Server) {
-				s.Boardcast("test")
+				s.Boardcast("test", "ok")
 				fmt.Println("message_sent:", s.MessageSent)
 				fmt.Println("connected_count:", len(s.Agents))
 				for conn, _ := range s.Agents {
@@ -43,14 +43,15 @@ func TestServer(t *testing.T) {
 }
 
 func tclient() {
-	c := NewClient("ws://localhost:8111")
-	c.OnTopic = func(topic string) {
+	c := NewClient("ws://localhost:8111", "mofon")
+	c.OnTopic = func(topic string, metas ...string) {
+		fmt.Println("client:", topic, metas)
 	}
 	c.OnError = func(err error) {
 		fmt.Println("error:", err)
 	}
 	c.AfterOpen = func(_ *websocket.Conn) {
-		go func() { c.Sub <- "test" }()
+		go c.Sub("test")
 	}
 
 	c.Serve()

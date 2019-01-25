@@ -8,27 +8,29 @@ var DefaultDialer = websocket.DefaultDialer
 
 type Client struct {
 	URL       string
+	Token     string // for auth
 	Dialer    *websocket.Dialer
-	OnTopic   func(string)
+	OnTopic   func(topic string, metas ...string)
 	AfterOpen func(conn *websocket.Conn)
 	OnError   func(error)
 
-	Unsub     chan string
-	Sub       chan string
-	Boardcast chan string
+	S chan string     // subscribe
+	U chan string     // unsubscrbe
+	B chan TopicEvent // boardcast
 }
 
-func NewClient(url string) *Client {
+func NewClient(url string, token string) *Client {
 	c := &Client{
 		URL:       url,
+		Token:     token,
 		Dialer:    DefaultDialer,
-		OnTopic:   func(_ string) {},
+		OnTopic:   func(_ string, _ ...string) {},
 		AfterOpen: func(_ *websocket.Conn) {},
 		OnError:   func(_ error) {},
 
-		Unsub:     make(chan string),
-		Sub:       make(chan string),
-		Boardcast: make(chan string),
+		U: make(chan string),
+		S: make(chan string),
+		B: make(chan TopicEvent),
 	}
 
 	return c
@@ -63,40 +65,59 @@ func (c *Client) Serve() {
 				continue
 			}
 
-			if p[1] != ':' || len(p) < 2 {
-				return
-			}
+			method, topic, metas := Decode(string(p))
 
-			text := string(p[2:])
-
-			switch p[0] {
-			case 'T': // topic
-				c.OnTopic(text)
+			switch method {
+			case "t": // topic
+				c.OnTopic(topic, metas...)
 			}
 		}
 	}(conn)
 
 	// write loop
+	err = conn.WriteMessage(websocket.TextMessage, Encode("A", c.Token))
+	if err != nil {
+		c.OnError(err)
+		return
+	}
+
 	for {
 		select {
-		case topic := <-c.Sub:
-			err := conn.WriteMessage(websocket.TextMessage, []byte("S:"+topic))
+		case topic := <-c.S:
+			err := conn.WriteMessage(websocket.TextMessage, Encode("S", topic))
 			if err != nil {
 				c.OnError(err)
 				return
 			}
-		case topic := <-c.Unsub:
-			err := conn.WriteMessage(websocket.TextMessage, []byte("U:"+topic))
+		case topic := <-c.U:
+			err := conn.WriteMessage(websocket.TextMessage, Encode("U", topic))
 			if err != nil {
 				c.OnError(err)
 				return
 			}
-		case topic := <-c.Boardcast:
-			err := conn.WriteMessage(websocket.TextMessage, []byte("B:"+topic))
+		case topic := <-c.B:
+			err := conn.WriteMessage(websocket.TextMessage, Encode("B", topic.Topic, topic.Meta...))
 			if err != nil {
 				c.OnError(err)
 				return
 			}
 		}
+	}
+}
+
+func (c *Client) Sub(topics ...string) {
+	for _, topic := range topics {
+		c.S <- topic
+	}
+}
+func (c *Client) Unsub(topics ...string) {
+	for _, topic := range topics {
+		c.U <- topic
+	}
+}
+func (c *Client) Boardcast(topic string, metas ...string) {
+	c.B <- TopicEvent{
+		Topic: topic,
+		Meta:  metas,
 	}
 }

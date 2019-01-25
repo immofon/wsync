@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,8 +49,8 @@ func test() {
 }
 
 func tclient() {
-	c := wsync.NewClient("ws://localhost:8111")
-	c.OnTopic = func(topic string) {
+	c := wsync.NewClient("ws://localhost:8111", "mofon")
+	c.OnTopic = func(topic string, metas ...string) {
 	}
 	c.OnError = func(err error) {
 		fmt.Println("error:", err)
@@ -57,12 +58,10 @@ func tclient() {
 	c.AfterOpen = func(conn *websocket.Conn) {
 		conn.WriteMessage(websocket.TextMessage, []byte("A:mofon"))
 		go func() {
-			c.Sub <- "test"
-			c.Sub <- "testclient"
+			c.Sub("test", "testclient")
 
 			time.Sleep(time.Second)
-			c.Boardcast <- "testclient"
-			c.Boardcast <- "testclient"
+			c.Boardcast("testclient")
 		}()
 	}
 
@@ -70,39 +69,35 @@ func tclient() {
 }
 
 func client() {
-	c := wsync.NewClient("ws://localhost:8111")
-	c.OnTopic = func(topic string) {
-		fmt.Println("T:", topic)
+	c := wsync.NewClient("ws://localhost:8111", "mofon")
+	c.OnTopic = func(topic string, metas ...string) {
+		fmt.Println("t:", topic, metas)
 	}
 	c.OnError = func(err error) {
 		fmt.Println("error:", err)
 	}
 	c.AfterOpen = func(conn *websocket.Conn) {
-		conn.WriteMessage(websocket.TextMessage, []byte("A:mofon"))
 		go func() {
-			c.Sub <- "test"
-			c.Sub <- "testclient"
+			c.Sub("test", "testclient")
 
 			time.Sleep(time.Second)
-			c.Boardcast <- "testclient"
-			c.Boardcast <- "testclient"
+
+			c.Boardcast("testclient")
 
 			scanner := bufio.NewScanner(os.Stdin)
 			for scanner.Scan() {
 				raw := scanner.Text()
-				if len(raw) < 2 || raw[1] != ':' {
-					help()
-					continue
-				}
-
-				topic := raw[2:]
-				switch raw[0] {
-				case 'S':
-					c.Sub <- topic
-				case 'U':
-					c.Unsub <- topic
-				case 'B':
-					c.Boardcast <- topic
+				data := strings.Split(raw, " ")
+				method, topic, metas := wsync.DecodeData(data...)
+				fmt.Println(method, topic, metas)
+				fmt.Println(method)
+				switch method {
+				case "S":
+					c.Sub(topic)
+				case "U":
+					c.Unsub(topic)
+				case "B":
+					c.Boardcast(topic, metas...)
 				default:
 					help()
 				}
@@ -121,7 +116,7 @@ func client() {
 }
 
 func help() {
-	fmt.Println("help: (S|U|B):{topic}")
+	fmt.Println("help: (S|U|B) topic {meta}")
 }
 
 func main() {

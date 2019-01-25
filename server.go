@@ -1,8 +1,10 @@
 package wsync
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,6 +19,8 @@ var DefaultUpgrader = websocket.Upgrader{
 }
 
 const DefaultMessageCache = 1
+
+const UnitSeparator = "\x1F"
 
 type AuthMethod int
 
@@ -39,13 +43,53 @@ func (am AuthMethod) String() string {
 	}
 }
 
+func Encode(method, topic string, metas ...string) []byte {
+	metas_encoded := strings.Join(metas, UnitSeparator)
+
+	var msg string
+	if metas_encoded != "" {
+		msg = strings.Join([]string{method, topic, metas_encoded}, UnitSeparator)
+	} else {
+		msg = strings.Join([]string{method, topic}, UnitSeparator)
+	}
+	return []byte(msg)
+}
+
+func DecodeData(data ...string) (method, topic string, metas []string) {
+	if len(data) > 0 {
+		method = data[0]
+	}
+	if len(data) > 1 {
+		topic = data[1]
+	}
+	if len(data) > 2 {
+		metas = data[2:]
+	}
+	return
+}
+func Decode(raw string) (method, topic string, metas []string) {
+	data := strings.Split(raw, UnitSeparator)
+
+	return DecodeData(data...)
+}
+
+type Topic struct {
+	Updated bool
+	Meta    []string
+}
+
+type TopicEvent struct {
+	Topic string
+	Meta  []string
+}
+
 type Agent struct {
-	Sub map[string]bool
+	Sub map[string]Topic
 }
 
 func NewAgent() *Agent {
 	return &Agent{
-		Sub: make(map[string]bool),
+		Sub: make(map[string]Topic),
 	}
 }
 
@@ -95,7 +139,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if msgCache < 1 {
 		msgCache = 1
 	}
-	updatedCh := make(chan string, msgCache)
+	updatedCh := make(chan TopicEvent, msgCache)
 
 	defer func() {
 		s.C <- func(s *Server) {
@@ -122,7 +166,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 
 				conn.SetWriteDeadline(time.Now().Add(WriteWait))
-				err := conn.WriteMessage(websocket.TextMessage, []byte("T:"+topic))
+				err := conn.WriteMessage(websocket.TextMessage, Encode("t", topic.Topic, topic.Meta...))
 				if err != nil {
 					conn.Close()
 				}
@@ -151,43 +195,39 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		if p[1] != ':' || len(p) < 2 {
-			return
-		}
 
-		topic := string(p[2:])
+		method, topic, metas := Decode(string(p))
+		fmt.Println(method, topic, metas)
 
-		switch p[0] {
-		case 'S': // subscibe
+		switch method {
+		case "S": // subscibe
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Sub, topic) {
 					conn.Close()
 				}
 				s.Sub(conn, topic)
 			}
-		case 'A': // auth
+		case "A": // auth
 			s.C <- func(s *Server) {
 				token = topic
 				if !s.Auth(token, AuthMethod_Auth, "") {
 					conn.Close()
 				}
 			}
-		case 'U': // unsubscibe
+		case "U": // unsubscibe
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Sub, topic) {
 					conn.Close()
 				}
 				s.Unsub(conn, topic)
 			}
-		case 'B': //boardcast
+		case "B": //boardcast
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Boardcast, topic) {
 					conn.Close()
 				}
-				s.Boardcast(topic)
+				s.Boardcast(topic, metas...)
 			}
-		case 'P': // ping
-			// TODO
 		}
 	}
 }
@@ -209,7 +249,7 @@ func (s *Server) Sub(conn *websocket.Conn, topic string) {
 	}
 
 	if _, ok := a.Sub[topic]; !ok {
-		a.Sub[topic] = false
+		a.Sub[topic] = Topic{false, nil}
 		log.Println("sub", conn.RemoteAddr(), topic)
 	}
 }
@@ -224,26 +264,29 @@ func (s *Server) Unsub(conn *websocket.Conn, topic string) {
 	log.Println("unsub", conn.RemoteAddr(), topic)
 }
 
-func (s *Server) Boardcast(topic string) {
+func (s *Server) Boardcast(topic string, metas ...string) {
 	for _, a := range s.Agents {
 		if _, ok := a.Sub[topic]; ok {
-			a.Sub[topic] = true
+			a.Sub[topic] = Topic{true, metas}
 		}
 	}
 	log.Println("boardcast", topic)
 }
 
-func (s *Server) GetUpdated(conn *websocket.Conn, ch chan<- string) {
+func (s *Server) GetUpdated(conn *websocket.Conn, ch chan<- TopicEvent) {
 	a := s.Agents[conn]
 	if a == nil {
 		return
 	}
 
-	for topic, updated := range a.Sub {
-		if updated {
+	for name, topic := range a.Sub {
+		if topic.Updated {
 			select {
-			case ch <- topic:
-				a.Sub[topic] = false
+			case ch <- TopicEvent{
+				Topic: name,
+				Meta:  topic.Meta,
+			}:
+				a.Sub[name] = Topic{false, nil}
 				s.MessageSent++
 			default:
 				return
