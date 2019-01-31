@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/immofon/wsync"
+	"github.com/webasis/wsync"
 )
 
 var ServerURL = getenv("WSYNC_SERVER_URL", "ws://localhost:8111/")
