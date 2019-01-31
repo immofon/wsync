@@ -45,8 +45,6 @@ func daemon() {
 		return true
 	}
 
-	go s.Serve()
-
 	go func() {
 		lastSent := 0
 		for range time.Tick(time.Second) {

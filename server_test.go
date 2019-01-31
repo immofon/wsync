@@ -12,7 +12,6 @@ import (
 
 func TestServer(t *testing.T) {
 	s := NewServer()
-	go s.Serve()
 
 	go func() {
 		for range time.Tick(time.Second) {

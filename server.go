@@ -110,7 +110,7 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	return &Server{
+	s := &Server{
 		C:         make(chan ServerFunc, 100),
 		Agents:    make(map[*websocket.Conn]*Agent),
 		InitMetas: make(map[string][]string),
@@ -121,9 +121,11 @@ func NewServer() *Server {
 		MessageCache: DefaultMessageCache,
 		Auth:         func(_ string, _ AuthMethod, _ string) bool { return true },
 	}
+	go s.loop()
+	return s
 }
 
-func (s *Server) Serve() {
+func (s *Server) loop() {
 	for fn := range s.C {
 		fn(s)
 	}
@@ -175,7 +177,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				s.C <- func(s *Server) { s.GetUpdated(conn, updatedCh) }
 			case <-pingTicker.C:
 				conn.SetWriteDeadline(time.Now().Add(WriteWait))
-				err := conn.WriteMessage(websocket.PingMessage, nil)
+				err := conn.WriteMessage(websocket.TextMessage, []byte("p"))
 				if err != nil {
 					conn.Close()
 				}
@@ -183,15 +185,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// read loop
-	conn.SetReadDeadline(time.Now().Add(PongWait))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(PongWait))
-		return nil
-	})
-
 	var token string
 	for {
+		conn.SetReadDeadline(time.Now().Add(PongWait))
 		_, p, err := conn.ReadMessage()
 		if err != nil {
 			return
@@ -228,6 +224,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				s.Boardcast(topic, metas...)
 			}
+		case "P":
 		}
 	}
 }
