@@ -1,10 +1,15 @@
 package wsync
 
 import (
+	"time"
+
 	"github.com/gorilla/websocket"
 )
 
 var DefaultDialer = websocket.DefaultDialer
+
+var DefaultReadWait = PongWait
+var DefaultWriteWait = WriteWait
 
 type Client struct {
 	URL       string
@@ -13,6 +18,9 @@ type Client struct {
 	OnTopic   func(topic string, metas ...string)
 	AfterOpen func(conn *websocket.Conn)
 	OnError   func(error)
+
+	ReadWait  time.Duration
+	WriteWait time.Duration
 
 	S chan string     // subscribe
 	U chan string     // unsubscrbe
@@ -27,6 +35,9 @@ func NewClient(url string, token string) *Client {
 		OnTopic:   func(_ string, _ ...string) {},
 		AfterOpen: func(_ *websocket.Conn) {},
 		OnError:   func(_ error) {},
+
+		ReadWait:  DefaultReadWait,
+		WriteWait: DefaultWriteWait,
 
 		U: make(chan string),
 		S: make(chan string),
@@ -50,6 +61,7 @@ func (c *Client) Serve() {
 	go func(conn *websocket.Conn) {
 		defer conn.Close()
 		for {
+			conn.SetReadDeadline(time.Now().Add(c.ReadWait))
 			_, p, err := conn.ReadMessage()
 			if err != nil {
 				c.OnError(err)
@@ -62,6 +74,7 @@ func (c *Client) Serve() {
 			case "t": // topic
 				c.OnTopic(topic, metas...)
 			case "p":
+				conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 				err = conn.WriteMessage(websocket.TextMessage, []byte("P"))
 				if err != nil {
 					c.OnError(err)
@@ -72,6 +85,7 @@ func (c *Client) Serve() {
 	}(conn)
 
 	// write loop
+	conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 	err = conn.WriteMessage(websocket.TextMessage, Encode("A", c.Token))
 	if err != nil {
 		c.OnError(err)
@@ -81,18 +95,21 @@ func (c *Client) Serve() {
 	for {
 		select {
 		case topic := <-c.S:
+			conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			err := conn.WriteMessage(websocket.TextMessage, Encode("S", topic))
 			if err != nil {
 				c.OnError(err)
 				return
 			}
 		case topic := <-c.U:
+			conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			err := conn.WriteMessage(websocket.TextMessage, Encode("U", topic))
 			if err != nil {
 				c.OnError(err)
 				return
 			}
 		case topic := <-c.B:
+			conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			err := conn.WriteMessage(websocket.TextMessage, Encode("B", topic.Topic, topic.Meta...))
 			if err != nil {
 				c.OnError(err)
