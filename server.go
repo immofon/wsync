@@ -200,6 +200,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Sub, topic) {
 					conn.Close()
+					return
 				}
 				s.Sub(conn, topic)
 			}
@@ -208,12 +209,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				token = topic
 				if !s.Auth(token, AuthMethod_Auth, "") {
 					conn.Close()
+					return
 				}
 			}
 		case "U": // unsubscibe
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Sub, topic) {
 					conn.Close()
+					return
 				}
 				s.Unsub(conn, topic)
 			}
@@ -221,6 +224,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.C <- func(s *Server) {
 				if !s.Auth(token, AuthMethod_Boardcast, topic) {
 					conn.Close()
+					return
 				}
 				s.Boardcast(topic, metas...)
 			}
