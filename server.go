@@ -273,7 +273,9 @@ NextTopic:
 				continue NextTopic
 			}
 		}
-		delete(s.InitMetas, topic)
+		if len(s.InitMetas[topic]) == 0 {
+			delete(s.InitMetas, topic)
+		}
 	}
 }
 
