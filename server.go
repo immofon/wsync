@@ -280,7 +280,11 @@ NextTopic:
 }
 
 func (s *Server) Boardcast(topic string, metas ...string) {
-	s.InitMetas[topic] = metas
+	if len(metas) > 0 {
+		s.InitMetas[topic] = metas
+	} else {
+		delete(s.InitMetas, topic)
+	}
 	for _, a := range s.Agents {
 		if _, ok := a.Sub[topic]; ok {
 			a.Sub[topic] = Topic{true, metas}
